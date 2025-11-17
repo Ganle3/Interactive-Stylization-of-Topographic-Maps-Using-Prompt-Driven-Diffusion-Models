@@ -141,7 +141,7 @@ def build_text_encoder(n_embed=768, n_layer=12, max_len=77, device="cuda", use_t
 
             self.ff = nn.Sequential(
                 nn.Linear(dim, hidden),
-                nn.GELU(),
+                nn.ReLU(),
                 nn.LayerNorm(hidden),
 
                 nn.Linear(hidden, hidden),
