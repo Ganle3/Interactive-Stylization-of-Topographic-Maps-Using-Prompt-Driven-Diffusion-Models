@@ -44,101 +44,12 @@ ldm_util.checkpoint = _no_checkpoint
 print("[patch] ldm.util.checkpoint disabled at runtime.")
 
 # CFG     = r"D:\Junyhuang\Project2\ControlNet\models\cldm_v15.yaml"
-ROOTDIR = r"D:\Junyhuang\Project2_Data\Training Data\Item_color"
+ROOTDIR = r"D:\Junyhuang\Project2_Data\Training Data\Element_styling"
 JSONL   = os.path.join(ROOTDIR, "meta", "pairs.jsonl")
 SPLIT_DIR = os.path.join(ROOTDIR, "meta_split")
-OUTDIR  = r"D:\Junyhuang\Project2\Outputs_19prompts_color_ctrlora_Unetlora_deepertext_maskloss"
+OUTDIR  = r"D:\Junyhuang\Project2\Outputs_Stylingprompts_ctrlora_Unetlora"
 LOSS_LOG_PATH = os.path.join(OUTDIR, "vis", "loss_log.json")
 os.makedirs(os.path.join(OUTDIR, "vis"), exist_ok=True)
-
-CLASS_RGB = {
-    "Building": (82, 82, 82),
-    "Highway": (247, 128, 30),
-    "Street_road": (149, 74, 162),
-    "Through_road": (255, 103, 227),
-    "River": (41, 163, 215),
-    "Lake": (55, 126, 184),
-    "Stream": (89, 180, 208),
-    "Tree": (63, 131, 55),
-    "Forest": (77, 175, 74),
-}
-
-KEYWORDS = {
-    "Through road": "Through_road",
-    "Building": "Building",
-    "Lake": "Lake",
-    "River": "River",
-    "Forest": "Forest",
-    "Tree": "Tree",
-    "Road": "Street_road",
-    "Highway": "Highway",
-    "Stream": "Stream",
-}
-
-def parse_prompt_class(prompt: str):
-    """从 prompt 推断目标类别名称（匹配 KEYWORDS）"""
-    p = prompt
-    for k in KEYWORDS.keys():
-        if k in p:
-            return KEYWORDS[k]
-    return None
-
-
-def extract_rgb_mask(seg: torch.Tensor, rgb_tuple, tolerance=5):
-    """
-    seg: [1,3,H,W] in [0,1]
-    rgb_tuple: (R,G,B) in [0,255]
-    """
-    r, g, b = rgb_tuple
-
-    seg255 = seg * 255.0  # 转回 0~255
-
-    diff = (seg255[:,0:1,:,:] - r).abs() \
-         + (seg255[:,1:2,:,:] - g).abs() \
-         + (seg255[:,2:3,:,:] - b).abs()
-
-    mask = (diff < tolerance).float()  # shape [1,1,H,W]
-    return mask
-
-
-def get_masked_color_losses(img_pred, gt, seg, prompts,
-                            alpha=0.5, beta=0.05):
-    """
-    img_pred: [B,3,H,W] 0-1
-    gt:       [B,3,H,W] 0-1
-    seg:      [B,3,H,W] 0-1  (训练数据中的 seg 输入)
-    prompts:  list[str] 长度为 B
-
-    返回: loss_color, loss_stable
-    """
-    B = img_pred.size(0)
-    masks = []
-
-    for i in range(B):
-        cls = parse_prompt_class(prompts[i])
-        if cls is None:
-            # 如果 prompt 不包含可识别类别，则不给 masked loss
-            masks.append(torch.zeros_like(seg[i:i+1, 0:1, :, :]))
-            continue
-
-        if cls not in CLASS_RGB:
-            masks.append(torch.zeros_like(seg[i:i+1, 0:1, :, :]))
-            continue
-
-        rgb = CLASS_RGB[cls]
-        mask_i = extract_rgb_mask(seg[i:i+1], rgb)
-        masks.append(mask_i)
-
-    mask = torch.cat(masks, dim=0)   # [B,1,H,W]
-
-    # === target class 的颜色 loss ===
-    loss_color = ((img_pred - gt)**2 * mask).mean()
-
-    # === 非 target 区域的稳定 loss ===
-    non_mask = 1 - mask
-    loss_stable = ((img_pred - gt)**2 * non_mask).mean()
-
-    return alpha * loss_color, beta * loss_stable
 
 # Training hyperparameters
 BATCH=1; SIZE=512; STEPS=150000; MAXLEN=77
@@ -155,6 +66,7 @@ SAVE_IMG_EVERY = 10000    # steps for visualization
 
 # introduce SDFusion text encoder
 from SDFusion_bert.bert_network.network import BERTTextEncoder
+
 
 # loss visualization for training insight
 def _load_loss_log(path):
@@ -229,18 +141,6 @@ def build_text_encoder(n_embed=768, n_layer=12, max_len=77, device="cuda", use_t
 
             self.ff = nn.Sequential(
                 nn.Linear(dim, hidden),
-                nn.ReLU(),
-                nn.LayerNorm(hidden),
-
-                nn.Linear(hidden, hidden),
-                nn.ReLU(),
-                nn.LayerNorm(hidden),
-
-                nn.Linear(hidden, hidden),
-                nn.ReLU(),
-                nn.LayerNorm(hidden),
-
-                nn.Linear(hidden, hidden),
                 nn.ReLU(),
                 nn.LayerNorm(hidden),
 
@@ -365,42 +265,20 @@ def disable_unet_checkpointing(unet):
 
 # 1. build model and load ckpt
 # === 路径配置 ===
-BASE_CKPT    = r"D:\Junyhuang\Project2\BaseModel\Swisstopo.ckpt"   # whole ckpt include U-Net
+CKPT    = r"D:\Junyhuang\Project2\BaseModel\Swisstopo.ckpt"   # whole ckpt include U-Net
 CTRLORA_CFG = r"D:\Junyhuang\Project2\ctrlora\configs\ctrlora_finetune_sd15_rank12.yaml"
-# === load previous trained weights for finetune ===
-ADAPTER_CKPT = r"D:\Junyhuang\Project2\Outputs_19prompts_color_ctrlora_Unetlora_deepertext_maskloss\textenc_adapter_step030000.pt"
-CTRLNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_19prompts_color_ctrlora_Unetlora_deepertext_maskloss\ctrlora_ft_step030000.ckpt"
-UNET_LORA_CKPT    = r"D:\Junyhuang\Project2\Outputs_19prompts_color_ctrlora_Unetlora_deepertext_maskloss\unet_lora_step030000.ckpt"
 
-# ---- A) load model skeleton with LoRA structure ----
+# 1) 创建带 LoRA 模块的 ControlNet 骨架
 model = create_model(CTRLORA_CFG).cpu()
-sd = torch.load(BASE_CKPT, map_location="cpu")
-state = sd.get("state_dict", sd)
-missing, unexpected = model.load_state_dict(state, strict=False)
-print("[load base] missing:", len(missing), "unexpected:", len(unexpected))
-del sd, state
+model = model.to(device).eval()
 
-# ---- B) load LoRA finetuned parameters ----
-lora_sd = torch.load(CTRLNET_LORA_CKPT, map_location="cpu")
-model.control_model.load_state_dict(lora_sd, strict=False)
-print("[load lora] loaded from", CTRLNET_LORA_CKPT)
+# 2) 加载 ckpt （内部会匹配 key）
+sd = torch.load(CKPT, map_location="cpu")
+state_dict = sd.get("state_dict", sd)  # 兼容保存结构不同的情况
+missing, unexpected = model.load_state_dict(state_dict, strict=False)
 
-# ---- C) load LoRA in main U-Net ----
-wrapped = lora_qkv(model.model.diffusion_model, r_q=4, r_kv=4)
-print("[unet] injected LoRA structure: Q={}, K={}, V={}".format(
-    wrapped["q"], wrapped["k"], wrapped["v"]
-))
-unet_lora_sd = torch.load(UNET_LORA_CKPT, map_location="cpu")
-missing_u, unexpected_u = model.model.diffusion_model.load_state_dict(
-    unet_lora_sd, strict=False
-)
-print(f"[unet lora loaded] missing={len(missing_u)}, unexpected={len(unexpected_u)}")
-
-textenc = build_text_encoder(device=device)
-textenc.load_state_dict(torch.load(ADAPTER_CKPT, map_location=device), strict=False)
-textenc = textenc.to(device).eval()
-print("[load textenc adapter] loaded from:", ADAPTER_CKPT)
-
+print(f"[ctrlora] loaded Swisstopo ckpt. missing={len(missing)}, unexpected={len(unexpected)}")
+del sd, state_dict
 
 # move to GPU FIRST
 model = model.to(device).eval()
@@ -415,8 +293,16 @@ try:
 except Exception as e:
     print("xformers not available:", e)
 
+# text encoder
+textenc = build_text_encoder(n_embed=768, n_layer=12, max_len=MAXLEN, device=device)
+textenc.train()
+
 disable_bert_dropout(textenc.hf_bert)
 print("[debug] BERT dropout disabled.")
+
+# then add LoRA so A/B are created on the same device
+wrapped = lora_qkv(model.model.diffusion_model, r_q=4, r_kv=LORA_R)
+print(f"LoRA-wrapped linears: Q={wrapped['q']}, K={wrapped['k']}, V={wrapped['v']}")
 
 # 1 freeze all
 for _, p in model.named_parameters():
@@ -445,9 +331,9 @@ print("[check] unet qkv lora params:", sum(p.numel() for p in unet_lora_params))
 adapter_params = [p for p in textenc.adapter.parameters() if p.requires_grad]
 
 param_groups = [
-    {"params": adapter_params,       "lr": 2e-6},   # BERT adapter
-    {"params": unet_lora_params,     "lr": 5e-6},   # main UNet Q/K/V LoRA
-    {"params": main_ctrl_params,     "lr": 5e-6},   # ctrlora norm+zero+local lora
+    {"params": adapter_params,       "lr": 2e-5},   # BERT adapter
+    {"params": unet_lora_params,     "lr": 5e-5},   # main UNet Q/K/V LoRA
+    {"params": main_ctrl_params,     "lr": 5e-5},   # ctrlora norm+zero+local lora
 ]
 
 opt = torch.optim.AdamW(param_groups, betas=(0.9, 0.999))
@@ -461,15 +347,15 @@ TOTAL_STEPS = STEPS
 def set_warmup_lr(step):
     scale = max(0.1, min(1.0, step / float(WARMUP)))  # 前 10% 起步，线性到 1.0
     # 基准 lr 与上面 param_groups 保持一致
-    base_lrs = [2e-6, 5e-6, 5e-6]
+    base_lrs = [2e-5, 5e-5, 5e-5]
     for g, base in zip(opt.param_groups, base_lrs):
         g["lr"] = base * scale
 
 from math import pi, cos
 def cosine_decay_lr(step):
     t = (step - WARMUP) / max(1, (TOTAL_STEPS - WARMUP))
-    base_lrs = [2e-6, 5e-6, 5e-6]
-    LR_FLOOR = 9e-7
+    base_lrs = [2e-5, 5e-5, 5e-5]
+    LR_FLOOR = 1e-6
     for g, base in zip(opt.param_groups, base_lrs):
         g["lr"] = max(LR_FLOOR, base * 0.5 * (1 + cos(pi * min(1.0, t))))
 
@@ -496,7 +382,7 @@ dl     = DataLoader(
 
 # 固定数据对
 ds_base = PairsJSONLDataset(JSONL, ROOTDIR, image_size=SIZE, seg_mode="RGB")
-ds_val = Subset(ds_base, [0, 349, 618, 927, 1236, 1545, 1854, 5263])
+ds_val = Subset(ds_base, [0, 349, 1218, 1527, 1836, 2545, 3854, 5263])
 dl_val = DataLoader(ds_val,   batch_size=8, shuffle=False, num_workers=0, pin_memory=True)
 
 print("[check] val len:",   len(ds_val))
@@ -528,7 +414,7 @@ print("[bert] any pooler requires_grad?:",
       any(p.requires_grad for p in textenc.hf_bert.pooler.parameters()) if hasattr(textenc.hf_bert,"pooler") else False)
 
 # 3. training loop
-global_step = 30000
+global_step = 0
 while global_step < STEPS:
     for batch in dl:
         global_step += 1
@@ -561,33 +447,10 @@ while global_step < STEPS:
             eps_hat = model.apply_model(z_noisy, t, cond)
 
             loss = F.mse_loss(eps_hat.float(), noise.float())
-            loss_color = torch.tensor(0.0, device=device)
-            loss_stable = torch.tensor(0.0, device=device)
 
-            # 1) 计算 x0
-            x0 = model.predict_start_from_noise(z_noisy, t, eps_hat)
-
-            # 2) decode
-            img_pred = model.decode_first_stage(x0)
-            img_pred = (img_pred + 1) / 2
-            gt_img = (gt + 1) / 2  # 保证在 0~1
-
-            # 3) masked loss
-            loss_color, loss_stable = get_masked_color_losses(
-                img_pred, gt_img, seg, prompts,
-                alpha=1.0, beta=0.05
-            )
-            if global_step < 10000:
-                loss_total = loss
-            else:
-                loss_total = loss + 5 * (loss_color + loss_stable)
-                # print("loss:", loss)
-                # print("loss color", loss_color)
-                # print("loss stable", loss_stable)
-
-            ema  = train_meter.update(loss_total.item())
+            ema  = train_meter.update(loss.item())
             loss_log["step"].append(int(global_step))
-            loss_log["train_mse"].append(float(loss_total.item()))
+            loss_log["train_mse"].append(float(loss.item()))
             loss_log["ema"].append(float(ema))
 
         # opt.zero_grad(set_to_none=True)
@@ -599,7 +462,7 @@ while global_step < STEPS:
 
         # Backpropagation with gradient scaling
         opt.zero_grad(set_to_none=True)
-        scaler.scale(loss_total).backward()
+        scaler.scale(loss).backward()
 
         # Unscale + gradient clipping
         scaler.unscale_(opt)
