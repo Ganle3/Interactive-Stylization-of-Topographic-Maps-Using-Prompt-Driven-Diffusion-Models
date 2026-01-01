@@ -17,12 +17,12 @@ JSONL   = os.path.join(ROOTDIR, "meta", "pairs.jsonl")
 SPLIT_DIR = os.path.join(ROOTDIR, "meta_split")
 
 # ==== CKPT path ====
-ADAPTER_CKPT = r"D:\Junyhuang\Project2\Outputs_19prompts_color_ctrlora_onlyCN\textenc_adapter_step090000.pt"
-CTRLNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_19prompts_color_ctrlora_onlyCN\ctrlora_ft_step090000.ckpt"
-# UNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_19prompts_color_ctrlora_Unetlora\unet_lora_step090000.ckpt"
+ADAPTER_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_32ctrl_8unt\textenc_adapter_step150000.pt"
+CTRLNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_32ctrl_8unt\ctrlora_ft_step150000.ckpt"
+UNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_32ctrl_8unt\unet_lora_step150000.ckpt"
 
 # ==== Output ====
-OUTDIR = r"D:\Junyhuang\Project2\Outputs_19prompts_color_ctrlora_onlyCN\generate_test_step90k"
+OUTDIR = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_32ctrl_8unt\generate_test_step100k"
 os.makedirs(OUTDIR, exist_ok=True)
 os.makedirs(os.path.join(OUTDIR, "viz"), exist_ok=True)
 
@@ -41,7 +41,7 @@ from lpips import LPIPS
 # ============= 1. Load model and apply LoRA =================
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-CTRLORA_CFG = r"D:\Junyhuang\Project2\ctrlora\configs\ctrlora_finetune_sd15_rank12.yaml"
+CTRLORA_CFG = r"D:\Junyhuang\Project2\ctrlora\configs\ctrlora_finetune_sd15_rank32.yaml"
 BASE_CKPT   = r"D:\Junyhuang\Project2\BaseModel\Swisstopo.ckpt"
 
 # ---- A) load model skeleton with LoRA structure ----
@@ -58,16 +58,16 @@ lora_sd = torch.load(CTRLNET_LORA_CKPT, map_location="cpu")
 model.control_model.load_state_dict(lora_sd, strict=False)
 print("[load lora] loaded from", CTRLNET_LORA_CKPT)
 
-# # ---- C) load LoRA in main U-Net ----
-# wrapped = lora_qkv(model.model.diffusion_model, r_q=4, r_kv=4)
-# print("[unet] injected LoRA structure: Q={}, K={}, V={}".format(
-#     wrapped["q"], wrapped["k"], wrapped["v"]
-# ))
-# unet_lora_sd = torch.load(UNET_LORA_CKPT, map_location="cpu")
-# missing_u, unexpected_u = model.model.diffusion_model.load_state_dict(
-#     unet_lora_sd, strict=False
-# )
-# print(f"[unet lora loaded] missing={len(missing_u)}, unexpected={len(unexpected_u)}")
+# ---- C) load LoRA in main U-Net ----
+wrapped = lora_qkv(model.model.diffusion_model, r_q=8, r_kv=8)
+print("[unet] injected LoRA structure: Q={}, K={}, V={}".format(
+    wrapped["q"], wrapped["k"], wrapped["v"]
+))
+unet_lora_sd = torch.load(UNET_LORA_CKPT, map_location="cpu")
+missing_u, unexpected_u = model.model.diffusion_model.load_state_dict(
+    unet_lora_sd, strict=False
+)
+print(f"[unet lora loaded] missing={len(missing_u)}, unexpected={len(unexpected_u)}")
 
 
 # ============= 2. Load BERT text encoder ====================
@@ -83,9 +83,23 @@ def build_text_encoder(n_embed=768, n_layer=12, max_len=77, device="cuda"):
                 torch.nn.Linear(dim, hidden),
                 torch.nn.ReLU(),
                 torch.nn.LayerNorm(hidden),
+
                 torch.nn.Linear(hidden, hidden),
                 torch.nn.ReLU(),
                 torch.nn.LayerNorm(hidden),
+
+                torch.nn.Linear(hidden, hidden),
+                torch.nn.ReLU(),
+                torch.nn.LayerNorm(hidden),
+
+                torch.nn.Linear(hidden, hidden),
+                torch.nn.ReLU(),
+                torch.nn.LayerNorm(hidden),
+
+                torch.nn.Linear(hidden, hidden),
+                torch.nn.ReLU(),
+                torch.nn.LayerNorm(hidden),
+
                 torch.nn.Linear(hidden, dim)
             )
             self.final_ln = torch.nn.LayerNorm(dim)
@@ -129,17 +143,24 @@ print("[load textenc adapter] loaded from:", ADAPTER_CKPT)
 
 # test seg and prompt
 seg_paths = [
-    r"D:\Junyhuang\Project2_Data\Training Data\Item_color\source\building_gray_000111.png",
+    r"D:\Junyhuang\Project2_Data\Training Data\PromptCate_SameSegs\Item_Color\source\tree_darkgreen_004441.png",
+    r"D:\Junyhuang\Project2_Data\Training Data\PromptCate_SameSegs\Item_Color\source\tree_darkgreen_004441.png",
+    r"D:\Junyhuang\Project2_Data\Training Data\PromptCate_SameSegs\Item_Color\source\tree_darkgreen_004441.png",
+    r"D:\Junyhuang\Project2_Data\Training Data\PromptCate_SameSegs\Item_Color\source\tree_darkgreen_004441.png",
+    r"D:\Junyhuang\Project2_Data\Training Data\PromptCate_SameSegs\Item_Color\source\tree_darkgreen_004441.png",
+    r"D:\Junyhuang\Project2_Data\Training Data\PromptCate_SameSegs\Item_Color\source\tree_darkgreen_004441.png",
     # r"D:\Junyhuang\Project2_Data\Training Data\Item_color_Copy\source\building_pink_000510.png",
     # r"D:\Junyhuang\Project2_Data\Training Data\Item_color_Copy\source\building_pink_000562.png",
     # r"D:\Junyhuang\Project2_Data\Training Data\Item_color_Copy\source\building_pink_000562.png",
 ]
 
 prompts = [
-    # "Set Forest color to light green.",
-    "Set Building color to gray.",
-    # "Keep original color.",
-    # "Set Building color to gray, Set River color to light green.",
+    "Render Forest with a diagonal hatch fill texture.",
+    "Render Tree as a small triangle-shaped mark symbol.",
+    "Render Road as a dashed line pattern. ",
+    "Keep all elements visible.",
+    "Render Tree as a small triangle-shaped mark symbol, Render Forest with a diagonal hatch fill texture.",
+    "Render Road as a dashed line pattern, Render Tree as a small triangle-shaped mark symbol",
 ]
 
 assert len(seg_paths) == len(prompts), "数量不匹配！seg_paths 和 prompts 必须一一对应"

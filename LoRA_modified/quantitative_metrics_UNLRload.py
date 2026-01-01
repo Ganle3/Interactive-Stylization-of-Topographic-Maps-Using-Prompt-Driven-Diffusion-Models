@@ -11,17 +11,17 @@ sys.path.append(r"D:\Junyhuang\Project2\ControlNet")
 sys.path.append(r"D:\Junyhuang\Project2\ctrlora")
 
 # ==== Config ====
-ROOTDIR = r"D:\Junyhuang\Project2_Data\Training Data\PromptCate_SS\Element_Styling"
+ROOTDIR = r"D:\Junyhuang\Project2_Data\Training Data\PromptCate_SameSegs\Element_Styling"
 JSONL   = os.path.join(ROOTDIR, "meta", "pairs.jsonl")
 SPLIT_DIR = os.path.join(ROOTDIR, "meta_split")
 
 # ==== CKPT path ====
-ADAPTER_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_final\textenc_adapter_step100000.pt"
-CTRLNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_final\ctrlora_ft_step100000.ckpt"
-UNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_final\unet_lora_step100000.ckpt"
+ADAPTER_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_32ctrl_8unt\textenc_adapter_step150000.pt"
+CTRLNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_32ctrl_8unt\ctrlora_ft_step150000.ckpt"
+UNET_LORA_CKPT = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_32ctrl_8unt\unet_lora_step150000.ckpt"
 
 # ==== Output ====
-OUTDIR = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_final\Quantitative_Results_step100k"
+OUTDIR = r"D:\Junyhuang\Project2\Outputs_20prompts_styling_32ctrl_8unt\Quantitative_Results_step150k"
 os.makedirs(OUTDIR, exist_ok=True)
 os.makedirs(os.path.join(OUTDIR, "viz"), exist_ok=True)
 
@@ -40,7 +40,7 @@ from lpips import LPIPS
 # ============= 1. Load model and apply LoRA =================
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-CTRLORA_CFG = r"D:\Junyhuang\Project2\ctrlora\configs\ctrlora_finetune_sd15_rank12.yaml"
+CTRLORA_CFG = r"D:\Junyhuang\Project2\ctrlora\configs\ctrlora_finetune_sd15_rank32.yaml"
 BASE_CKPT   = r"D:\Junyhuang\Project2\BaseModel\Swisstopo.ckpt"
 
 # ---- A) load model skeleton with LoRA structure ----
@@ -58,7 +58,7 @@ model.control_model.load_state_dict(lora_sd, strict=False)
 print("[load lora] loaded from", CTRLNET_LORA_CKPT)
 
 # ---- C) load LoRA in main U-Net ----
-wrapped = lora_qkv(model.model.diffusion_model, r_q=4, r_kv=4)
+wrapped = lora_qkv(model.model.diffusion_model, r_q=8, r_kv=8)
 print("[unet] injected LoRA structure: Q={}, K={}, V={}".format(
     wrapped["q"], wrapped["k"], wrapped["v"]
 ))
